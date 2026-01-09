@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <title>Flitskaarten</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background: #f4f4f4;
+        }
+
+        #kaart {
+            margin: 20px auto;
+            padding: 20px;
+            border: 1px solid #ccc;
+            background: white;
+            min-height: 100px;
+            max-width: 600px;
+            font-size: 20px;
+        }
+
+        input {
+            margin: 5px;
+            padding: 10px;
+            font-size: 16px;
+            width: 300px;
+        }
+
+        button {
+            margin: 5px;
+            padding: 10px 18px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        #resultaat {
+            font-weight: bold;
+            font-size: 18px;
+            margin-top: 10px;
+        }
+
+        #volgendeKnop:disabled,
+        #controleerKnop:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>Flitskaarten</h1>
+
+    <input type="file" id="xmlUpload" accept=".xml" onchange="laadXML(this)">
+
+    <div id="kaart">Upload een XML-bestand om te beginnen</div>
+
+    <input type="text" id="antwoord" placeholder="Jouw antwoord" onkeypress="handleKeyPress(event)" autocomplete="off">
+
+    <br>
+
+    <button onclick="checkAntwoord()" id="controleerKnop">Controleer</button>
+    <button onclick="volgendeKaart()" id="volgendeKnop" disabled>Volgende</button>
+
+    <p id="resultaat"></p>
+
+<script>
+let kaarten = [];
+let huidigeKaarten = [];
+let huidigeKaartIndex = 0;
+let fouteKaarten = [];
+let heeftGeantwoord = false;
+
+
+/* ===============================
+   XML laden
+================================ */
+
+function laadXML(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const xmlString = e.target.result;
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(xmlString, "text/xml");
+        const kaartNodes = xmlDoc.getElementsByTagName("kaart");
+
+        kaarten = [];
+        let kaartID = 0;
+
+        for (let i = 0; i < kaartNodes.length; i++) {
+            const vraag = kaartNodes[i].getElementsByTagName("vraag")[0].textContent.trim();
+            const antwoord = kaartNodes[i].getElementsByTagName("antwoord")[0].textContent.trim();
+            const tweezijdig = kaartNodes[i].getAttribute("tweezijdig") === "ja";
+
+            // Eerste kant
+            kaarten.push({
+                id: kaartID++,
+                vraag: vraag,
+                antwoord: antwoord,
+                eerstePoging: null
+            });
+
+            // Tweede kant indien tweezijdig
+            if (tweezijdig) {
+                kaarten.push({
+                    id: kaartID++,
+                    vraag: antwoord,
+                    antwoord: vraag,
+                    eerstePoging: null
+                });
+            }
+        }
+
+        startOverhoring();
+    };
+
+    reader.readAsText(file);
+}
+
+
+/* ===============================
+   Start toets
+================================ */
+
+function startOverhoring() {
+    huidigeKaarten = [...kaarten].sort(() => Math.random() - 0.5);
+    huidigeKaartIndex = 0;
+    fouteKaarten = [];
+    toonKaart();
+}
+
+
+/* ===============================
+   Toon kaart
+================================ */
+
+function toonKaart() {
+
+    if (huidigeKaartIndex < huidigeKaarten.length) {
+
+        const kaart = huidigeKaarten[huidigeKaartIndex];
+
+        document.getElementById("kaart").innerHTML = kaart.vraag;
+        document.getElementById("antwoord").value = "";
+        document.getElementById("resultaat").innerHTML = "";
+        document.getElementById("resultaat").style.color = "black";
+
+        document.getElementById("volgendeKnop").disabled = true;
+        document.getElementById("controleerKnop").disabled = false;
+
+        heeftGeantwoord = false;
+
+    } else {
+
+        // Eerst alle foute kaarten herhalen (zonder invloed op cijfer)
+        if (fouteKaarten.length > 0) {
+            huidigeKaarten = [...fouteKaarten].sort(() => Math.random() - 0.5);
+            fouteKaarten = [];
+            huidigeKaartIndex = 0;
+            toonKaart();
+        } else {
+            toonResultaat();
+        }
+    }
+}
+
+
+/* ===============================
+   Antwoord controleren
+================================ */
+
+function checkAntwoord() {
+
+    if (heeftGeantwoord) return;
+
+    const invoer = document.getElementById("antwoord").value.trim();
+    if (!invoer) return;
+
+    const kaart = huidigeKaarten[huidigeKaartIndex];
+    const correct = kaart.antwoord.trim();
+
+    const resultaat = document.getElementById("resultaat");
+
+    heeftGeantwoord = true;
+    document.getElementById("volgendeKnop").disabled = false;
+    document.getElementById("controleerKnop").disabled = true;
+
+    if (invoer.toLowerCase() === correct.toLowerCase()) {
+
+        resultaat.innerHTML = "Goed!";
+        resultaat.style.color = "green";
+
+        if (kaart.eerstePoging === null) {
+            kaart.eerstePoging = true;
+        }
+
+    } else {
+
+        resultaat.innerHTML = "Fout! Het juiste antwoord is: " + correct;
+        resultaat.style.color = "red";
+
+        if (kaart.eerstePoging === null) {
+            kaart.eerstePoging = false;
+        }
+
+        if (!fouteKaarten.includes(kaart)) {
+            fouteKaarten.push(kaart);
+        }
+    }
+}
+
+
+/* ===============================
+   Volgende kaart
+================================ */
+
+function volgendeKaart() {
+    huidigeKaartIndex++;
+    toonKaart();
+}
+
+
+/* ===============================
+   Enter toets
+================================ */
+
+function handleKeyPress(event) {
+    if (event.key === "Enter") {
+        event.preventDefault();
+        if (!heeftGeantwoord) {
+            checkAntwoord();
+        } else {
+            volgendeKaart();
+        }
+    }
+}
+
+
+/* ===============================
+   Resultaat
+================================ */
+
+function toonResultaat() {
+
+    const totaal = kaarten.length;
+    const goed = kaarten.filter(k => k.eerstePoging === true).length;
+    const fout = totaal - goed;
+
+    const cijfer = (goed / totaal) * 10;
+
+    document.getElementById("kaart").innerHTML = `
+        <h2>Klaar!</h2>
+        <p>Goed: ${goed} van ${totaal}</p>
+        <p>Fout: ${fout}</p>
+        <p><b>Cijfer: ${cijfer.toFixed(1)}</b></p>
+        <br>
+        <button onclick="startOverhoring()">Nog een keer</button>
+    `;
+
+    document.getElementById("resultaat").innerHTML = "";
+    document.getElementById("volgendeKnop").disabled = true;
+    document.getElementById("controleerKnop").disabled = true;
+}
+
+</script>
+
+</body>
+</html>

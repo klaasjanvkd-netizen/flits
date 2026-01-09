@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Flitskaarten Editor</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; }
+        #opgaven { margin: 20px auto; width: 80%; }
+        .opgave { margin: 10px; padding: 10px; border: 1px solid #ccc; text-align: left; }
+        button { margin: 5px; padding: 8px 16px; }
+        input, textarea { margin: 5px; padding: 8px; width: 80%; }
+        #inputSection { background-color: #f9f9f9; padding: 10px; margin-bottom: 20px; border: 1px solid #ddd; }
+    </style>
+</head>
+<body>
+    <h1>Flitskaarten Editor</h1>
+
+    <!-- Inputsectie bovenaan -->
+    <div id="inputSection">
+        <h3>Nieuwe opgave</h3>
+        <textarea id="vraag" placeholder="Vraag" onkeypress="handleKeyPress(event)"></textarea><br>
+        <textarea id="antwoord" placeholder="Antwoord" onkeypress="handleKeyPress(event)"></textarea><br>
+        <label><input type="checkbox" id="tweezijdig"> Tweezijdig</label><br>
+        <button onclick="voegOpgaveToe()">Toevoegen</button>
+    </div>
+
+    <div id="opgaven"></div>
+    <button onclick="downloadXML()">Download XML</button>
+    <a href="flitskaarten.html"><button>Terug naar flitskaarten</button></a>
+
+    <script>
+        let opgaven = [];
+        let tweezijdigStandaard = false;
+
+        // Voeg opgave toe
+        function voegOpgaveToe() {
+            const vraag = document.getElementById("vraag").value;
+            const antwoord = document.getElementById("antwoord").value;
+            const tweezijdig = document.getElementById("tweezijdig").checked;
+
+            if (vraag && antwoord) {
+                opgaven.push({ vraag, antwoord, tweezijdig });
+                updateOpgavenLijst();
+                document.getElementById("vraag").value = "";
+                document.getElementById("antwoord").value = "";
+                tweezijdigStandaard = tweezijdig; // Onthoud de staat van het vinkje
+                document.getElementById("tweezijdig").checked = tweezijdigStandaard;
+            }
+        }
+
+        // Update de lijst met opgaven
+        function updateOpgavenLijst() {
+            const opgavenDiv = document.getElementById("opgaven");
+            opgavenDiv.innerHTML = "<h3>Opgaven</h3>";
+            opgaven.forEach((opgave, index) => {
+                opgavenDiv.innerHTML += `
+                    <div class="opgave">
+                        <p><strong>Vraag:</strong> ${opgave.vraag}</p>
+                        <p><strong>Antwoord:</strong> ${opgave.antwoord}</p>
+                        <p><strong>Tweezijdig:</strong> ${opgave.tweezijdig ? "Ja" : "Nee"}</p>
+                        <button onclick="verwijderOpgave(${index})">Verwijderen</button>
+                    </div>
+                `;
+            });
+        }
+
+        // Verwijder een opgave
+        function verwijderOpgave(index) {
+            opgaven.splice(index, 1);
+            updateOpgavenLijst();
+        }
+
+        // Download XML-bestand
+        function downloadXML() {
+            let xmlContent = '<?xml version="1.0" encoding="UTF-8"?>\n<flitskaarten>\n';
+            opgaven.forEach(opgave => {
+                xmlContent += `
+    <kaart tweezijdig="${opgave.tweezijdig ? "ja" : "nee"}">
+        <vraag>${opgave.vraag.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</vraag>
+        <antwoord>${opgave.antwoord.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</antwoord>
+    </kaart>
+`;
+            });
+            xmlContent += '</flitskaarten>';
+
+            const blob = new Blob([xmlContent], { type: "application/xml" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "vragen.xml";
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // Toevoegen met Enter
+        function handleKeyPress(event) {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                voegOpgaveToe();
+            }
+        }
+    </script>
+</body>
+</html>
