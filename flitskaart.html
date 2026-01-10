@@ -2,272 +2,275 @@
 <html lang="nl">
 <head>
     <meta charset="UTF-8">
-    <title>Flitskaarten</title>
-
+    <title>Flitskaarten App</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            text-align: center;
-            background: #f4f4f4;
-        }
-
-        #kaart {
-            margin: 20px auto;
-            padding: 20px;
-            border: 1px solid #ccc;
-            background: white;
-            min-height: 100px;
-            max-width: 600px;
-            font-size: 20px;
-        }
-
-        input {
-            margin: 5px;
-            padding: 10px;
-            font-size: 16px;
-            width: 300px;
-        }
-
-        button {
-            margin: 5px;
-            padding: 10px 18px;
-            font-size: 16px;
-            cursor: pointer;
-        }
-
-        #resultaat {
-            font-weight: bold;
-            font-size: 18px;
-            margin-top: 10px;
-        }
-
-        #volgendeKnop:disabled,
-        #controleerKnop:disabled {
-            background-color: #cccccc;
-            cursor: not-allowed;
-        }
+        body { font-family: Arial, sans-serif; margin: 0; background: #f0f0f0; }
+        header { background: #1e40af; color: white; padding: 15px; text-align: center; font-size: 22px; }
+        main { padding: 20px; }
+        .card { background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
+        input, textarea, button { width: 100%; padding: 10px; font-size: 18px; margin-top: 8px; box-sizing: border-box; }
+        button { background: #1e40af; color: white; border: none; border-radius: 6px; cursor: pointer; }
+        button.secondary { background: #555; }
+        button.danger { background: #b91c1c; }
+        .hidden { display: none; }
+        hr { margin: 20px 0; border: 0; border-top: 1px solid #ccc; }
     </style>
 </head>
-
 <body>
+    <header>Flitskaarten App</header>
+    <main>
+        <div id="menu" class="card">
+            <h2>Menu</h2>
+            <button id="btnSets">📚 Opgavensets</button>
+            <button id="btnNieuw">📝 Nieuwe set maken</button>
+        </div>
 
-    <h1>Flitskaarten</h1>
+        <div id="sets" class="hidden"></div>
+        <div id="editor" class="hidden"></div>
+        <div id="oefenen" class="hidden"></div>
+    </main>
 
-    <input type="file" id="xmlUpload" accept=".xml" onchange="laadXML(this)">
+    <script>
+        let sets = JSON.parse(localStorage.getItem("flits_sets") || "[]");
 
-    <div id="kaart">Upload een XML-bestand om te beginnen</div>
+        function saveSets() {
+            localStorage.setItem("flits_sets", JSON.stringify(sets));
+        }
 
-    <input type="text" id="antwoord" placeholder="Jouw antwoord" onkeypress="handleKeyPress(event)" autocomplete="off">
+        const menu = document.getElementById("menu");
+        const setsDiv = document.getElementById("sets");
+        const editorDiv = document.getElementById("editor");
+        const oefenDiv = document.getElementById("oefenen");
 
-    <br>
+        function hideAll() {
+            [menu, setsDiv, editorDiv, oefenDiv].forEach(div => div.classList.add("hidden"));
+        }
 
-    <button onclick="checkAntwoord()" id="controleerKnop">Controleer</button>
-    <button onclick="volgendeKaart()" id="volgendeKnop" disabled>Volgende</button>
+        function showMenu() {
+            hideAll();
+            menu.classList.remove("hidden");
+        }
 
-    <p id="resultaat"></p>
+        function showSets() {
+            hideAll();
+            setsDiv.classList.remove("hidden");
+            let html = `<div class="card"><h2>Opgavensets</h2>`;
+            if (sets.length === 0) html += `<p>Geen sets opgeslagen.</p>`;
+            sets.forEach((s, i) => {
+                html += `
+                <div class="card">
+                    <b>${s.naam}</b><br>
+                    ${s.opgaven.length} opgaven<br><br>
+                    <button onclick="startOefening(${i})">Oefenen</button>
+                    <button class="danger" onclick="deleteSet(${i})">Verwijderen</button>
+                </div>`;
+            });
+            html += `<button class="secondary" onclick="showMenu()">⬅ Terug</button></div>`;
+            setsDiv.innerHTML = html;
+        }
 
-<script>
-let kaarten = [];
-let huidigeKaarten = [];
-let huidigeKaartIndex = 0;
-let fouteKaarten = [];
-let heeftGeantwoord = false;
+        function deleteSet(i) {
+            sets.splice(i, 1);
+            saveSets();
+            showSets();
+        }
 
+        let currentSet = { naam: "", opgaven: [] };
 
-/* ===============================
-   XML laden
-================================ */
+        function showEditor() {
+            hideAll();
+            editorDiv.classList.remove("hidden");
+            currentSet = { naam: "", opgaven: [] };
+            renderEditor();
+        }
 
-function laadXML(input) {
-    const file = input.files[0];
-    if (!file) return;
+        function renderEditor() {
+            editorDiv.innerHTML = `
+                <div class="card">
+                    <h2>Nieuwe set</h2>
+                    <label>Setnaam</label>
+                    <input id="setNaam" placeholder="Naam van set">
+                    <hr>
+                    <h3>Nieuwe opgave</h3>
+                    <textarea id="vraag" placeholder="Vraag"></textarea>
+                    <textarea id="antwoord" placeholder="Antwoord"></textarea>
+                    <label style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
+                        <input type="checkbox" id="twee" style="width: auto; margin: 0;"> Tweezijdig
+                    </label>
+                    <button id="btnAdd">Opgave toevoegen</button>
+                    <hr>
+                    <h3>Opgaven (${currentSet.opgaven.length})</h3>
+                    <div id="lijst"></div>
+                    <hr>
+                    <button id="btnSave">Set opslaan</button>
+                    <button class="secondary" id="btnBack">⬅ Terug</button>
+                </div>
+            `;
 
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        const xmlString = e.target.result;
-        const parser = new DOMParser();
-        const xmlDoc = parser.parseFromString(xmlString, "text/xml");
-        const kaartNodes = xmlDoc.getElementsByTagName("kaart");
+            document.getElementById("btnAdd").onclick = addOpgave;
+            document.getElementById("btnSave").onclick = saveSet;
+            document.getElementById("btnBack").onclick = showMenu;
+            updateLijst();
+        }
 
-        kaarten = [];
-        let kaartID = 0;
+        function addOpgave() {
+            const vraagInput = document.getElementById("vraag");
+            const antwoordInput = document.getElementById("antwoord");
+            const tweezijdigCheckbox = document.getElementById("twee");
 
-        for (let i = 0; i < kaartNodes.length; i++) {
-            const vraag = kaartNodes[i].getElementsByTagName("vraag")[0].textContent.trim();
-            const antwoord = kaartNodes[i].getElementsByTagName("antwoord")[0].textContent.trim();
-            const tweezijdig = kaartNodes[i].getAttribute("tweezijdig") === "ja";
+            const vraag = vraagInput.value.trim();
+            const antwoord = antwoordInput.value.trim();
+            const tweezijdig = tweezijdigCheckbox.checked;
 
-            // Eerste kant
-            kaarten.push({
-                id: kaartID++,
-                vraag: vraag,
-                antwoord: antwoord,
-                eerstePoging: null
+            if (!vraag || !antwoord) return;
+
+            currentSet.opgaven.push({ vraag, antwoord, tweezijdig });
+            
+            // Reset velden maar BEHOUD de status van de checkbox
+            vraagInput.value = "";
+            antwoordInput.value = "";
+            // tweezijdigCheckbox.checked blijft wat het was
+            
+            updateLijst();
+            vraagInput.focus();
+        }
+
+        function updateLijst() {
+            const lijst = document.getElementById("lijst");
+            lijst.innerHTML = "";
+            currentSet.opgaven.forEach((o, i) => {
+                const div = document.createElement("div");
+                div.className = "card";
+                div.style.border = "1px solid #ddd";
+                div.innerHTML = `
+                    <b>V:</b> ${o.vraag} | <b>A:</b> ${o.antwoord} | <b>2-zijdig:</b> ${o.tweezijdig ? "Ja" : "Nee"}<br>
+                    <button class="danger" style="width: auto; padding: 5px 10px; font-size: 14px; margin-top: 5px;">Verwijderen</button>
+                `;
+                div.querySelector("button").onclick = () => {
+                    currentSet.opgaven.splice(i, 1);
+                    updateLijst();
+                };
+                lijst.appendChild(div);
+            });
+        }
+
+        function saveSet() {
+            const naam = document.getElementById("setNaam").value.trim();
+            if (!naam || currentSet.opgaven.length === 0) return;
+            currentSet.naam = naam;
+            sets.push(currentSet);
+            saveSets();
+            showMenu();
+        }
+
+        // Oefen logica
+        let huidigeOefening = null;
+        let huidigeKaarten = [];
+        let huidigeKaartIndex = 0;
+        let fouteKaarten = [];
+        let goedeAntwoordenEersteRonde = 0;
+        let totaalAantalUniekeVragen = 0;
+        let isEersteRonde = true;
+
+        function startOefening(setIndex) {
+            huidigeOefening = sets[setIndex];
+            huidigeKaarten = [];
+            isEersteRonde = true;
+            goedeAntwoordenEersteRonde = 0;
+
+            huidigeOefening.opgaven.forEach(opgave => {
+                huidigeKaarten.push({ ...opgave, isOmgekeerd: false });
+                if (opgave.tweezijdig) {
+                    huidigeKaarten.push({ ...opgave, isOmgekeerd: true });
+                }
             });
 
-            // Tweede kant indien tweezijdig
-            if (tweezijdig) {
-                kaarten.push({
-                    id: kaartID++,
-                    vraag: antwoord,
-                    antwoord: vraag,
-                    eerstePoging: null
-                });
+            totaalAantalUniekeVragen = huidigeKaarten.length;
+            huidigeKaarten = huidigeKaarten.sort(() => Math.random() - 0.5);
+            huidigeKaartIndex = 0;
+            fouteKaarten = [];
+
+            hideAll();
+            oefenDiv.classList.remove("hidden");
+            toonOefenKaart();
+        }
+
+        function toonOefenKaart() {
+            if (huidigeKaartIndex < huidigeKaarten.length) {
+                const kaart = huidigeKaarten[huidigeKaartIndex];
+                const vraag = kaart.isOmgekeerd ? kaart.antwoord : kaart.vraag;
+                const correctAntwoord = kaart.isOmgekeerd ? kaart.vraag : kaart.antwoord;
+
+                oefenDiv.innerHTML = `
+                    <div class="card">
+                        <h2>${huidigeOefening.naam} ${!isEersteRonde ? "(Herhaling)" : ""}</h2>
+                        <p><b>Vraag:</b> ${vraag}</p>
+                        <input id="oefenAntwoord" placeholder="Jouw antwoord" autocomplete="off">
+                        <button onclick="checkOefenAntwoord('${correctAntwoord.replace(/'/g, "\\'")}')">Controleer</button>
+                        <p id="oefenResultaat"></p>
+                    </div>
+                `;
+                document.getElementById("oefenAntwoord").focus();
+            } else {
+                if (fouteKaarten.length > 0) {
+                    // Start herhaalronde
+                    isEersteRonde = false; 
+                    huidigeKaarten = [...fouteKaarten].sort(() => Math.random() - 0.5);
+                    fouteKaarten = [];
+                    huidigeKaartIndex = 0;
+                    toonOefenKaart();
+                } else {
+                    // Resultaat berekenen op basis van de eerste ronde
+                    const cijfer = (goedeAntwoordenEersteRonde / totaalAantalUniekeVragen) * 9 + 1;
+                    oefenDiv.innerHTML = `
+                        <div class="card">
+                            <h2>Klaar!</h2>
+                            <p>Score eerste ronde: ${goedeAntwoordenEersteRonde} van de ${totaalAantalUniekeVragen}</p>
+                            <p style="font-size: 24px; font-weight: bold;">Je cijfer: ${cijfer.toFixed(1)}</p>
+                            <button onclick="showMenu()">Terug naar menu</button>
+                            <button class="secondary" onclick="startOefening(${sets.indexOf(huidigeOefening)})">Opnieuw starten</button>
+                        </div>
+                    `;
+                }
             }
         }
 
-        startOverhoring();
-    };
+        function checkOefenAntwoord(correctAntwoord) {
+            const inputVelden = document.getElementById("oefenAntwoord");
+            const antwoord = inputVelden.value.trim();
+            const resultaat = document.getElementById("oefenResultaat");
+            const kaart = huidigeKaarten[huidigeKaartIndex];
 
-    reader.readAsText(file);
-}
+            const isGoed = antwoord.toLowerCase() === correctAntwoord.toLowerCase();
 
+            if (isGoed) {
+                resultaat.innerHTML = `<span style="color: green; font-weight: bold;">Goed!</span>`;
+                if (isEersteRonde) {
+                    goedeAntwoordenEersteRonde++;
+                }
+            } else {
+                resultaat.innerHTML = `<span style="color: red; font-weight: bold;">Fout!</span> Het antwoord is: <b>${correctAntwoord}</b>`;
+                fouteKaarten.push(kaart);
+            }
 
-/* ===============================
-   Start toets
-================================ */
-
-function startOverhoring() {
-    huidigeKaarten = [...kaarten].sort(() => Math.random() - 0.5);
-    huidigeKaartIndex = 0;
-    fouteKaarten = [];
-    toonKaart();
-}
-
-
-/* ===============================
-   Toon kaart
-================================ */
-
-function toonKaart() {
-
-    if (huidigeKaartIndex < huidigeKaarten.length) {
-
-        const kaart = huidigeKaarten[huidigeKaartIndex];
-
-        document.getElementById("kaart").innerHTML = kaart.vraag;
-        document.getElementById("antwoord").value = "";
-        document.getElementById("resultaat").innerHTML = "";
-        document.getElementById("resultaat").style.color = "black";
-
-        document.getElementById("volgendeKnop").disabled = true;
-        document.getElementById("controleerKnop").disabled = false;
-
-        heeftGeantwoord = false;
-
-    } else {
-
-        // Eerst alle foute kaarten herhalen (zonder invloed op cijfer)
-        if (fouteKaarten.length > 0) {
-            huidigeKaarten = [...fouteKaarten].sort(() => Math.random() - 0.5);
-            fouteKaarten = [];
-            huidigeKaartIndex = 0;
-            toonKaart();
-        } else {
-            toonResultaat();
-        }
-    }
-}
-
-
-/* ===============================
-   Antwoord controleren
-================================ */
-
-function checkAntwoord() {
-
-    if (heeftGeantwoord) return;
-
-    const invoer = document.getElementById("antwoord").value.trim();
-    if (!invoer) return;
-
-    const kaart = huidigeKaarten[huidigeKaartIndex];
-    const correct = kaart.antwoord.trim();
-
-    const resultaat = document.getElementById("resultaat");
-
-    heeftGeantwoord = true;
-    document.getElementById("volgendeKnop").disabled = false;
-    document.getElementById("controleerKnop").disabled = true;
-
-    if (invoer.toLowerCase() === correct.toLowerCase()) {
-
-        resultaat.innerHTML = "Goed!";
-        resultaat.style.color = "green";
-
-        if (kaart.eerstePoging === null) {
-            kaart.eerstePoging = true;
+            inputVelden.disabled = true;
+            const button = document.createElement("button");
+            button.textContent = "Volgende";
+            button.onclick = volgendeOefenKaart;
+            resultaat.appendChild(button);
+            button.focus();
         }
 
-    } else {
-
-        resultaat.innerHTML = "Fout! Het juiste antwoord is: " + correct;
-        resultaat.style.color = "red";
-
-        if (kaart.eerstePoging === null) {
-            kaart.eerstePoging = false;
+        function volgendeOefenKaart() {
+            huidigeKaartIndex++;
+            toonOefenKaart();
         }
 
-        if (!fouteKaarten.includes(kaart)) {
-            fouteKaarten.push(kaart);
-        }
-    }
-}
+        document.getElementById("btnSets").onclick = showSets;
+        document.getElementById("btnNieuw").onclick = showEditor;
 
-
-/* ===============================
-   Volgende kaart
-================================ */
-
-function volgendeKaart() {
-    huidigeKaartIndex++;
-    toonKaart();
-}
-
-
-/* ===============================
-   Enter toets
-================================ */
-
-function handleKeyPress(event) {
-    if (event.key === "Enter") {
-        event.preventDefault();
-        if (!heeftGeantwoord) {
-            checkAntwoord();
-        } else {
-            volgendeKaart();
-        }
-    }
-}
-
-
-/* ===============================
-   Resultaat
-================================ */
-
-function toonResultaat() {
-
-    const totaal = kaarten.length;
-    const goed = kaarten.filter(k => k.eerstePoging === true).length;
-    const fout = totaal - goed;
-
-    const cijfer = (goed / totaal) * 10;
-
-    document.getElementById("kaart").innerHTML = `
-        <h2>Klaar!</h2>
-        <p>Goed: ${goed} van ${totaal}</p>
-        <p>Fout: ${fout}</p>
-        <p><b>Cijfer: ${cijfer.toFixed(1)}</b></p>
-        <br>
-        <button onclick="startOverhoring()">Nog een keer</button>
-    `;
-
-    document.getElementById("resultaat").innerHTML = "";
-    document.getElementById("volgendeKnop").disabled = true;
-    document.getElementById("controleerKnop").disabled = true;
-}
-
-</script>
-
+        showMenu();
+    </script>
 </body>
 </html>
