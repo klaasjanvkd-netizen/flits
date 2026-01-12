@@ -2,7 +2,7 @@
 <html lang="nl">
 <head>
     <meta charset="UTF-8">
-    <title>Flitskaarten App</title>
+    <title>Flitskaarten</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body { font-family: Arial, sans-serif; margin: 0; background: #f0f0f0; }
@@ -13,165 +13,180 @@
         button { background: #1e40af; color: white; border: none; border-radius: 6px; cursor: pointer; }
         button.secondary { background: #555; }
         button.danger { background: #b91c1c; }
+        button.warning { background: #d97706; }
         .hidden { display: none; }
         hr { margin: 20px 0; border: 0; border-top: 1px solid #ccc; }
+        .flex-row { display: flex; gap: 10px; }
+        .feedback-area { margin-top: 15px; min-height: 50px; }
+        .feedback-goed { color: #15803d; font-weight: bold; font-size: 22px; }
+        .feedback-fout { color: #b91c1c; font-weight: bold; font-size: 22px; }
     </style>
 </head>
 <body>
     <header>Flitskaarten App</header>
     <main>
         <div id="menu" class="card">
-            <h2>Menu</h2>
-            <button id="btnSets">📚 Opgavensets</button>
-            <button id="btnNieuw">📝 Nieuwe set maken</button>
+            <h2>Hoofdmenu</h2>
+            <button id="btnNavOefenen">🎯 Oefenen</button>
+            <button id="btnNavBeheer" class="secondary">⚙️ Sets bewerken</button>
         </div>
 
-        <div id="sets" class="hidden"></div>
+        <div id="oefenLijst" class="hidden"></div>
+        <div id="beheerLijst" class="hidden"></div>
         <div id="editor" class="hidden"></div>
-        <div id="oefenen" class="hidden"></div>
+        <div id="oefenScherm" class="hidden"></div>
     </main>
 
     <script>
+        // --- DATA & STATE ---
         let sets = JSON.parse(localStorage.getItem("flits_sets") || "[]");
+        let editingIndex = -1;
+        let deleteConfirmIndex = -1;
 
         function saveSets() {
             localStorage.setItem("flits_sets", JSON.stringify(sets));
         }
 
-        const menu = document.getElementById("menu");
-        const setsDiv = document.getElementById("sets");
-        const editorDiv = document.getElementById("editor");
-        const oefenDiv = document.getElementById("oefenen");
+        const views = {
+            menu: document.getElementById("menu"),
+            oefenLijst: document.getElementById("oefenLijst"),
+            beheerLijst: document.getElementById("beheerLijst"),
+            editor: document.getElementById("editor"),
+            oefenScherm: document.getElementById("oefenScherm")
+        };
 
         function hideAll() {
-            [menu, setsDiv, editorDiv, oefenDiv].forEach(div => div.classList.add("hidden"));
+            Object.values(views).forEach(div => div.classList.add("hidden"));
         }
 
         function showMenu() {
             hideAll();
-            menu.classList.remove("hidden");
+            views.menu.classList.remove("hidden");
         }
 
-        function showSets() {
+        // --- BEHEER-MODULE (CREËREN, BEWERKEN, VERWIJDEREN) ---
+        function showBeheerLijst() {
             hideAll();
-            setsDiv.classList.remove("hidden");
-            let html = `<div class="card"><h2>Opgavensets</h2>`;
-            if (sets.length === 0) html += `<p>Geen sets opgeslagen.</p>`;
+            views.beheerLijst.classList.remove("hidden");
+            let html = `<div class="card"><h2>Sets bewerken</h2>
+                        <button onclick="openEditor(-1)">➕ Nieuwe set maken</button><hr>`;
             sets.forEach((s, i) => {
-                html += `
-                <div class="card">
-                    <b>${s.naam}</b><br>
-                    ${s.opgaven.length} opgaven<br><br>
-                    <button onclick="startOefening(${i})">Oefenen</button>
-                    <button class="danger" onclick="deleteSet(${i})">Verwijderen</button>
-                </div>`;
+                html += `<div class="card" style="border: 1px solid #ccc;">
+                    <b>${s.naam}</b><br>`;
+                if (deleteConfirmIndex === i) {
+                    html += `<div style="background:#fee2e2; padding:10px; border-radius:5px; margin-top:5px;">
+                        <p style="color:#b91c1c; margin:0; font-weight:bold;">Set verwijderen?</p>
+                        <div class="flex-row" style="margin-top:10px;">
+                            <button class="danger" onclick="confirmDelete(${i})">Ja, verwijder</button>
+                            <button class="secondary" onclick="cancelDelete()">Nee</button>
+                        </div>
+                    </div>`;
+                } else {
+                    html += `<div class="flex-row" style="margin-top:10px;">
+                        <button onclick="openEditor(${i})">✏️ Kaarten bewerken</button>
+                        <button class="danger" style="width:50px;" onclick="askDelete(${i})">🗑️</button>
+                    </div>`;
+                }
+                html += `</div>`;
             });
             html += `<button class="secondary" onclick="showMenu()">⬅ Terug</button></div>`;
-            setsDiv.innerHTML = html;
+            views.beheerLijst.innerHTML = html;
         }
 
-        function deleteSet(i) {
-            sets.splice(i, 1);
-            saveSets();
-            showSets();
-        }
+        function askDelete(i) { deleteConfirmIndex = i; showBeheerLijst(); }
+        function cancelDelete() { deleteConfirmIndex = -1; showBeheerLijst(); }
+        function confirmDelete(i) { sets.splice(i, 1); saveSets(); showBeheerLijst(); }
 
-        let currentSet = { naam: "", opgaven: [] };
-
-        function showEditor() {
+        function openEditor(index) {
             hideAll();
-            editorDiv.classList.remove("hidden");
-            currentSet = { naam: "", opgaven: [] };
+            editingIndex = index;
+            currentSet = index === -1 ? { naam: "", opgaven: [] } : JSON.parse(JSON.stringify(sets[index]));
+            views.editor.classList.remove("hidden");
             renderEditor();
         }
 
         function renderEditor() {
-            editorDiv.innerHTML = `
+            views.editor.innerHTML = `
                 <div class="card">
-                    <h2>Nieuwe set</h2>
-                    <label>Setnaam</label>
-                    <input id="setNaam" placeholder="Naam van set">
+                    <h2>${editingIndex === -1 ? "Nieuwe set maken" : "Set bewerken"}</h2>
+                    <input id="setNaam" placeholder="Naam van de set" value="${currentSet.naam}">
                     <hr>
-                    <h3>Nieuwe opgave</h3>
+                    <h3>Kaarten toevoegen/verwijderen</h3>
                     <textarea id="vraag" placeholder="Vraag"></textarea>
                     <textarea id="antwoord" placeholder="Antwoord"></textarea>
-                    <label style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
-                        <input type="checkbox" id="twee" style="width: auto; margin: 0;"> Tweezijdig
+                    <label style="display:flex; align-items:center; gap:10px; margin:10px 0;">
+                        <input type="checkbox" id="twee" style="width:auto;"> Tweezijdig (maakt 2 opgaven)
                     </label>
-                    <button id="btnAdd">Opgave toevoegen</button>
+                    <button id="btnAdd">Voeg kaart toe</button>
                     <hr>
-                    <h3>Opgaven (${currentSet.opgaven.length})</h3>
                     <div id="lijst"></div>
                     <hr>
-                    <button id="btnSave">Set opslaan</button>
-                    <button class="secondary" id="btnBack">⬅ Terug</button>
-                </div>
-            `;
-
+                    <button id="btnSave" class="warning">Opslaan</button>
+                    <button class="secondary" onclick="showBeheerLijst()">Annuleren</button>
+                </div>`;
             document.getElementById("btnAdd").onclick = addOpgave;
-            document.getElementById("btnSave").onclick = saveSet;
-            document.getElementById("btnBack").onclick = showMenu;
+            document.getElementById("btnSave").onclick = commitSet;
             updateLijst();
         }
 
         function addOpgave() {
-            const vraagInput = document.getElementById("vraag");
-            const antwoordInput = document.getElementById("antwoord");
-            const tweezijdigCheckbox = document.getElementById("twee");
-
-            const vraag = vraagInput.value.trim();
-            const antwoord = antwoordInput.value.trim();
-            const tweezijdig = tweezijdigCheckbox.checked;
-
-            if (!vraag || !antwoord) return;
-
-            currentSet.opgaven.push({ vraag, antwoord, tweezijdig });
-            
-            // Reset velden maar BEHOUD de status van de checkbox
-            vraagInput.value = "";
-            antwoordInput.value = "";
-            // tweezijdigCheckbox.checked blijft wat het was
-            
+            const v = document.getElementById("vraag").value.trim();
+            const a = document.getElementById("antwoord").value.trim();
+            const t = document.getElementById("twee").checked;
+            if (!v || !a) return;
+            currentSet.opgaven.push({ vraag: v, antwoord: a, tweezijdig: t });
+            document.getElementById("vraag").value = "";
+            document.getElementById("antwoord").value = "";
             updateLijst();
-            vraagInput.focus();
+            document.getElementById("vraag").focus();
         }
 
         function updateLijst() {
             const lijst = document.getElementById("lijst");
-            lijst.innerHTML = "";
+            lijst.innerHTML = `<h4>Huidige kaarten (${currentSet.opgaven.length})</h4>`;
             currentSet.opgaven.forEach((o, i) => {
                 const div = document.createElement("div");
-                div.className = "card";
-                div.style.border = "1px solid #ddd";
-                div.innerHTML = `
-                    <b>V:</b> ${o.vraag} | <b>A:</b> ${o.antwoord} | <b>2-zijdig:</b> ${o.tweezijdig ? "Ja" : "Nee"}<br>
-                    <button class="danger" style="width: auto; padding: 5px 10px; font-size: 14px; margin-top: 5px;">Verwijderen</button>
-                `;
-                div.querySelector("button").onclick = () => {
-                    currentSet.opgaven.splice(i, 1);
-                    updateLijst();
-                };
+                div.style = "font-size:14px; padding:5px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;";
+                div.innerHTML = `<span><b>V:</b> ${o.vraag} | <b>A:</b> ${o.antwoord}</span> 
+                                 <button class="danger" style="width:auto; padding:5px 10px; font-size:12px;" onclick="removeKaart(${i})">Verwijder</button>`;
                 lijst.appendChild(div);
             });
         }
+        function removeKaart(i) { currentSet.opgaven.splice(i, 1); updateLijst(); }
 
-        function saveSet() {
+        function commitSet() {
             const naam = document.getElementById("setNaam").value.trim();
             if (!naam || currentSet.opgaven.length === 0) return;
             currentSet.naam = naam;
-            sets.push(currentSet);
+            if (editingIndex === -1) sets.push(currentSet); else sets[editingIndex] = currentSet;
             saveSets();
-            showMenu();
+            showBeheerLijst();
         }
 
-        // Oefen logica
+        // --- OEFEN-MODULE ---
         let huidigeOefening = null;
         let huidigeKaarten = [];
         let huidigeKaartIndex = 0;
         let fouteKaarten = [];
         let goedeAntwoordenEersteRonde = 0;
-        let totaalAantalUniekeVragen = 0;
+        let totaalAantalOpgaven = 0;
         let isEersteRonde = true;
+        let isGecontroleerd = false; 
+
+        function showOefenLijst() {
+            hideAll();
+            views.oefenLijst.classList.remove("hidden");
+            let html = `<div class="card"><h2>🎯 Oefenen</h2>`;
+            if (sets.length === 0) html += `<p>Geen sets beschikbaar.</p>`;
+            sets.forEach((s, i) => {
+                html += `<div class="card" style="border-left: 5px solid #1e40af;">
+                    <b>${s.naam}</b><br>
+                    <button onclick="startOefening(${i})">▶ Set spelen</button>
+                </div>`;
+            });
+            html += `<button class="secondary" onclick="showMenu()">⬅ Terug</button></div>`;
+            views.oefenLijst.innerHTML = html;
+        }
 
         function startOefening(setIndex) {
             huidigeOefening = sets[setIndex];
@@ -186,90 +201,127 @@
                 }
             });
 
-            totaalAantalUniekeVragen = huidigeKaarten.length;
+            totaalAantalOpgaven = huidigeKaarten.length; // Inclusief de omgekeerde kaarten
             huidigeKaarten = huidigeKaarten.sort(() => Math.random() - 0.5);
             huidigeKaartIndex = 0;
             fouteKaarten = [];
 
             hideAll();
-            oefenDiv.classList.remove("hidden");
+            views.oefenScherm.classList.remove("hidden");
             toonOefenKaart();
         }
 
         function toonOefenKaart() {
+            isGecontroleerd = false; 
             if (huidigeKaartIndex < huidigeKaarten.length) {
                 const kaart = huidigeKaarten[huidigeKaartIndex];
                 const vraag = kaart.isOmgekeerd ? kaart.antwoord : kaart.vraag;
-                const correctAntwoord = kaart.isOmgekeerd ? kaart.vraag : kaart.antwoord;
+                const correct = kaart.isOmgekeerd ? kaart.vraag : kaart.antwoord;
 
-                oefenDiv.innerHTML = `
+                views.oefenScherm.innerHTML = `
                     <div class="card">
                         <h2>${huidigeOefening.naam} ${!isEersteRonde ? "(Herhaling)" : ""}</h2>
-                        <p><b>Vraag:</b> ${vraag}</p>
-                        <input id="oefenAntwoord" placeholder="Jouw antwoord" autocomplete="off">
-                        <button onclick="checkOefenAntwoord('${correctAntwoord.replace(/'/g, "\\'")}')">Controleer</button>
-                        <p id="oefenResultaat"></p>
+                        <p>Vraag ${huidigeKaartIndex + 1} van ${huidigeKaarten.length}</p>
+                        <hr>
+                        <p style="font-size: 20px;"><b>${vraag}</b></p>
+                        <input id="oefenAntwoord" placeholder="Typ antwoord..." autocomplete="off">
+                        <div id="feedbackContainer" class="feedback-area"></div>
+                        <div id="actionContainer">
+                             <button id="btnCheck">Controleer (Enter)</button>
+                        </div>
                     </div>
                 `;
-                document.getElementById("oefenAntwoord").focus();
+                
+                const input = document.getElementById("oefenAntwoord");
+                input.focus();
+                
+                // Enter-flow op input
+                input.onkeydown = (e) => {
+                    if (e.key === "Enter") {
+                        e.preventDefault();
+                        if (!isGecontroleerd) checkOefenAntwoord(correct);
+                    }
+                };
+
+                document.getElementById("btnCheck").onclick = () => checkOefenAntwoord(correct);
             } else {
-                if (fouteKaarten.length > 0) {
-                    // Start herhaalronde
-                    isEersteRonde = false; 
-                    huidigeKaarten = [...fouteKaarten].sort(() => Math.random() - 0.5);
-                    fouteKaarten = [];
-                    huidigeKaartIndex = 0;
-                    toonOefenKaart();
-                } else {
-                    // Resultaat berekenen op basis van de eerste ronde
-                    const cijfer = (goedeAntwoordenEersteRonde / totaalAantalUniekeVragen) * 9 + 1;
-                    oefenDiv.innerHTML = `
-                        <div class="card">
-                            <h2>Klaar!</h2>
-                            <p>Score eerste ronde: ${goedeAntwoordenEersteRonde} van de ${totaalAantalUniekeVragen}</p>
-                            <p style="font-size: 24px; font-weight: bold;">Je cijfer: ${cijfer.toFixed(1)}</p>
-                            <button onclick="showMenu()">Terug naar menu</button>
-                            <button class="secondary" onclick="startOefening(${sets.indexOf(huidigeOefening)})">Opnieuw starten</button>
-                        </div>
-                    `;
-                }
+                eindeRonde();
             }
         }
 
-        function checkOefenAntwoord(correctAntwoord) {
-            const inputVelden = document.getElementById("oefenAntwoord");
-            const antwoord = inputVelden.value.trim();
-            const resultaat = document.getElementById("oefenResultaat");
-            const kaart = huidigeKaarten[huidigeKaartIndex];
+        function checkOefenAntwoord(correct) {
+            if (isGecontroleerd) return;
+            isGecontroleerd = true;
 
-            const isGoed = antwoord.toLowerCase() === correctAntwoord.toLowerCase();
+            const input = document.getElementById("oefenAntwoord");
+            const feedbackContainer = document.getElementById("feedbackContainer");
+            const actionContainer = document.getElementById("actionContainer");
+            const kaart = huidigeKaarten[huidigeKaartIndex];
+            
+            const isGoed = input.value.trim().toLowerCase() === correct.toLowerCase();
+            input.disabled = true;
 
             if (isGoed) {
-                resultaat.innerHTML = `<span style="color: green; font-weight: bold;">Goed!</span>`;
-                if (isEersteRonde) {
-                    goedeAntwoordenEersteRonde++;
-                }
+                feedbackContainer.innerHTML = `<p class="feedback-goed">✅ Goed!</p>`;
+                if (isEersteRonde) goedeAntwoordenEersteRonde++;
             } else {
-                resultaat.innerHTML = `<span style="color: red; font-weight: bold;">Fout!</span> Het antwoord is: <b>${correctAntwoord}</b>`;
+                feedbackContainer.innerHTML = `
+                    <p class="feedback-fout">❌ Fout!</p>
+                    <p>Het juiste antwoord is: <b style="font-size: 20px;">${correct}</b></p>
+                `;
                 fouteKaarten.push(kaart);
             }
 
-            inputVelden.disabled = true;
-            const button = document.createElement("button");
-            button.textContent = "Volgende";
-            button.onclick = volgendeOefenKaart;
-            resultaat.appendChild(button);
-            button.focus();
+            // Vervang de check-knop door de volgende-knop
+            actionContainer.innerHTML = `<button id="btnNext">Volgende vraag (Enter)</button>`;
+            const btnNext = document.getElementById("btnNext");
+            btnNext.focus();
+            
+            btnNext.onclick = () => {
+                huidigeKaartIndex++;
+                toonOefenKaart();
+            };
         }
 
-        function volgendeOefenKaart() {
-            huidigeKaartIndex++;
+        function eindeRonde() {
+            const cijfer = (goedeAntwoordenEersteRonde / totaalAantalOpgaven) * 9 + 1;
+            
+            if (fouteKaarten.length > 0) {
+                views.oefenScherm.innerHTML = `
+                    <div class="card">
+                        <h2>Ronde afgerond</h2>
+                        ${isEersteRonde ? `
+                            <p>Cijfer op basis van eerste poging:</p>
+                            <h1 style="color:#1e40af;">${cijfer.toFixed(1)}</h1>
+                        ` : "<p>Herhaling voltooid.</p>"}
+                        <p>Je hebt nog ${fouteKaarten.length} fouten over.</p>
+                        <hr>
+                        <button onclick="startHerhaling()">Resterende fouten oefenen</button>
+                        <button class="secondary" onclick="showOefenLijst()">Sessie stoppen</button>
+                    </div>`;
+            } else {
+                views.oefenScherm.innerHTML = `
+                    <div class="card" style="text-align: center;">
+                        <h2>Gefeliciteerd!</h2>
+                        <p>Je kent nu alle kaarten uit deze set.</p>
+                        <p>Resultaat eerste ronde:</p>
+                        <div style="font-size: 48px; font-weight: bold; color: #1e40af;">${cijfer.toFixed(1)}</div>
+                        <button onclick="showOefenLijst()" style="margin-top:20px;">Klaar</button>
+                    </div>`;
+            }
+        }
+
+        function startHerhaling() {
+            isEersteRonde = false;
+            huidigeKaarten = [...fouteKaarten].sort(() => Math.random() - 0.5);
+            fouteKaarten = [];
+            huidigeKaartIndex = 0;
             toonOefenKaart();
         }
 
-        document.getElementById("btnSets").onclick = showSets;
-        document.getElementById("btnNieuw").onclick = showEditor;
-
+        // Navigatie Listeners
+        document.getElementById("btnNavOefenen").onclick = showOefenLijst;
+        document.getElementById("btnNavBeheer").onclick = showBeheerLijst;
         showMenu();
     </script>
 </body>
