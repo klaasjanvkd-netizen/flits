@@ -14,12 +14,15 @@
         button.secondary { background: #555; }
         button.danger { background: #b91c1c; }
         button.warning { background: #d97706; }
+        button.success { background: #15803d; }
         .hidden { display: none; }
         hr { margin: 20px 0; border: 0; border-top: 1px solid #ccc; }
         .flex-row { display: flex; gap: 10px; }
         .feedback-area { margin-top: 15px; min-height: 50px; }
         .feedback-goed { color: #15803d; font-weight: bold; font-size: 22px; }
         .feedback-fout { color: #b91c1c; font-weight: bold; font-size: 22px; }
+        .unsaved-banner { background: #fef3c7; border: 1px solid #d97706; border-radius: 5px;
+                          padding: 8px 12px; color: #92400e; font-size: 14px; margin-top: 8px; }
     </style>
 </head>
 <body>
@@ -30,11 +33,11 @@
             <button id="btnNavOefenen">🎯 Oefenen</button>
             <button id="btnNavBeheer" class="secondary">⚙️ Sets bewerken</button>
         </div>
-
         <div id="oefenLijst" class="hidden"></div>
         <div id="beheerLijst" class="hidden"></div>
         <div id="editor" class="hidden"></div>
         <div id="oefenScherm" class="hidden"></div>
+        <input type="file" id="importPicker" accept=".csv" class="hidden">
     </main>
 
     <script>
@@ -42,9 +45,27 @@
         let sets = JSON.parse(localStorage.getItem("flits_sets") || "[]");
         let editingIndex = -1;
         let deleteConfirmIndex = -1;
+        let currentSet = null;
+        let heeftOngeslagenWijzigingen = false;
+        let importConflictSet = null;
+        let importConflictIndex = -1;
 
         function saveSets() {
             localStorage.setItem("flits_sets", JSON.stringify(sets));
+        }
+
+        // --- SHUFFLE (Fisher-Yates) ---
+        function shuffle(arr) {
+            for (let i = arr.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [arr[i], arr[j]] = [arr[j], arr[i]];
+            }
+            return arr;
+        }
+
+        // --- ANTWOORD NORMALISATIE ---
+        function normalizeAntwoord(s) {
+            return s.trim().toLowerCase().replace(/\s+/g, ' ').replace(/[.,!?;:]+$/, '');
         }
 
         const views = {
@@ -60,19 +81,29 @@
         }
 
         function showMenu() {
+            clearEnterHandler();
             hideAll();
             views.menu.classList.remove("hidden");
         }
 
-        // --- BEHEER-MODULE (CREËREN, BEWERKEN, VERWIJDEREN) ---
+        // --- BEHEER-MODULE ---
         function showBeheerLijst() {
+            clearEnterHandler();
+            importConflictSet = null;
+            importConflictIndex = -1;
             hideAll();
             views.beheerLijst.classList.remove("hidden");
+
             let html = `<div class="card"><h2>Sets bewerken</h2>
-                        <button onclick="openEditor(-1)">➕ Nieuwe set maken</button><hr>`;
+                <div class="flex-row">
+                    <button onclick="openEditor(-1)">➕ Nieuwe set</button>
+                    <button class="success" onclick="triggerImport()">📂 Openen</button>
+                </div><hr>`;
+
             sets.forEach((s, i) => {
                 html += `<div class="card" style="border: 1px solid #ccc;">
-                    <b>${s.naam}</b><br>`;
+                    <b>${s.naam}</b> <span style="color:#888; font-size:13px;">(${s.opgaven.length} kaarten)</span><br>`;
+
                 if (deleteConfirmIndex === i) {
                     html += `<div style="background:#fee2e2; padding:10px; border-radius:5px; margin-top:5px;">
                         <p style="color:#b91c1c; margin:0; font-weight:bold;">Set verwijderen?</p>
@@ -83,24 +114,31 @@
                     </div>`;
                 } else {
                     html += `<div class="flex-row" style="margin-top:10px;">
-                        <button onclick="openEditor(${i})">✏️ Kaarten bewerken</button>
+                        <button onclick="openEditor(${i})">✏️ Bewerken</button>
+                        ${!inIframe ? `<button class="secondary" onclick="exporteerSet(${i})">💾 Opslaan</button>` : ''}
                         <button class="danger" style="width:50px;" onclick="askDelete(${i})">🗑️</button>
                     </div>`;
                 }
                 html += `</div>`;
             });
+
             html += `<button class="secondary" onclick="showMenu()">⬅ Terug</button></div>`;
             views.beheerLijst.innerHTML = html;
         }
 
         function askDelete(i) { deleteConfirmIndex = i; showBeheerLijst(); }
         function cancelDelete() { deleteConfirmIndex = -1; showBeheerLijst(); }
-        function confirmDelete(i) { sets.splice(i, 1); saveSets(); showBeheerLijst(); }
+        function confirmDelete(i) { sets.splice(i, 1); saveSets(); deleteConfirmIndex = -1; showBeheerLijst(); }
 
+        // --- EDITOR ---
         function openEditor(index) {
+            clearEnterHandler();
             hideAll();
             editingIndex = index;
-            currentSet = index === -1 ? { naam: "", opgaven: [] } : JSON.parse(JSON.stringify(sets[index]));
+            heeftOngeslagenWijzigingen = false;
+            currentSet = index === -1
+                ? { naam: "", opgaven: [] }
+                : JSON.parse(JSON.stringify(sets[index]));
             views.editor.classList.remove("hidden");
             renderEditor();
         }
@@ -111,7 +149,7 @@
                     <h2>${editingIndex === -1 ? "Nieuwe set maken" : "Set bewerken"}</h2>
                     <input id="setNaam" placeholder="Naam van de set" value="${currentSet.naam}">
                     <hr>
-                    <h3>Kaarten toevoegen/verwijderen</h3>
+                    <h3>Kaart toevoegen</h3>
                     <textarea id="vraag" placeholder="Vraag"></textarea>
                     <textarea id="antwoord" placeholder="Antwoord"></textarea>
                     <label style="display:flex; align-items:center; gap:10px; margin:10px 0;">
@@ -119,13 +157,18 @@
                     </label>
                     <button id="btnAdd">Voeg kaart toe</button>
                     <hr>
+                    <div id="saveStatus"></div>
                     <div id="lijst"></div>
                     <hr>
-                    <button id="btnSave" class="warning">Opslaan</button>
-                    <button class="secondary" onclick="showBeheerLijst()">Annuleren</button>
+                    <button id="btnSave" class="warning">💾 Opslaan</button>
+                    <button class="secondary" id="btnAnnuleer">Annuleren</button>
                 </div>`;
             document.getElementById("btnAdd").onclick = addOpgave;
             document.getElementById("btnSave").onclick = commitSet;
+            document.getElementById("btnAnnuleer").onclick = () => {
+                if (editingIndex === -1) showBeheerLijst();
+                else openEditor(editingIndex); // herlaad opgeslagen versie
+            };
             updateLijst();
         }
 
@@ -137,30 +180,180 @@
             currentSet.opgaven.push({ vraag: v, antwoord: a, tweezijdig: t });
             document.getElementById("vraag").value = "";
             document.getElementById("antwoord").value = "";
+
+            // Auto-save na toevoeging, alleen voor bestaande sets
+            if (editingIndex !== -1) {
+                sets[editingIndex] = currentSet;
+                saveSets();
+                heeftOngeslagenWijzigingen = false;
+            }
+
             updateLijst();
             document.getElementById("vraag").focus();
         }
 
         function updateLijst() {
+            // Bewaar naam zodat die niet verloren gaat bij re-render van de lijst
+            const naamVeld = document.getElementById("setNaam");
+            if (naamVeld) currentSet.naam = naamVeld.value;
+
+            const status = document.getElementById("saveStatus");
+            if (status) {
+                status.innerHTML = heeftOngeslagenWijzigingen
+                    ? `<div class="unsaved-banner">⚠️ Onopgeslagen wijzigingen — gebruik 💾 Opslaan of Annuleren om te herstellen.</div>`
+                    : "";
+            }
+
             const lijst = document.getElementById("lijst");
             lijst.innerHTML = `<h4>Huidige kaarten (${currentSet.opgaven.length})</h4>`;
             currentSet.opgaven.forEach((o, i) => {
                 const div = document.createElement("div");
                 div.style = "font-size:14px; padding:5px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;";
-                div.innerHTML = `<span><b>V:</b> ${o.vraag} | <b>A:</b> ${o.antwoord}</span> 
+                div.innerHTML = `<span><b>V:</b> ${o.vraag} &nbsp;|&nbsp; <b>A:</b> ${o.antwoord}${o.tweezijdig ? ' <em style="color:#888">(2-zijdig)</em>' : ''}</span>
                                  <button class="danger" style="width:auto; padding:5px 10px; font-size:12px;" onclick="removeKaart(${i})">Verwijder</button>`;
                 lijst.appendChild(div);
             });
         }
-        function removeKaart(i) { currentSet.opgaven.splice(i, 1); updateLijst(); }
+
+        function removeKaart(i) {
+            currentSet.opgaven.splice(i, 1);
+            heeftOngeslagenWijzigingen = true;
+            updateLijst();
+        }
 
         function commitSet() {
             const naam = document.getElementById("setNaam").value.trim();
-            if (!naam || currentSet.opgaven.length === 0) return;
+            if (!naam) { alert("Geef de set een naam."); return; }
+            if (currentSet.opgaven.length === 0) { alert("Voeg minimaal één kaart toe."); return; }
             currentSet.naam = naam;
-            if (editingIndex === -1) sets.push(currentSet); else sets[editingIndex] = currentSet;
+            if (editingIndex === -1) sets.push(currentSet);
+            else sets[editingIndex] = currentSet;
             saveSets();
+            heeftOngeslagenWijzigingen = false;
             showBeheerLijst();
+        }
+
+        // --- EXPORT ---
+        function exporteerSet(i) {
+            const set = sets[i];
+            const blob = new Blob([JSON.stringify(set, null, 2)], { type: "text/plain" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.download = set.naam.replace(/\s+/g, "_") + ".csv";
+            a.href = url;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // --- IMPORT ---
+        function triggerImport() {
+            document.getElementById("importPicker").value = "";
+            document.getElementById("importPicker").click();
+        }
+
+        document.getElementById("importPicker").onchange = function(e) {
+            const bestand = e.target.files[0];
+            if (!bestand) return;
+            const reader = new FileReader();
+            reader.onload = function(ev) {
+                let set;
+                try {
+                    set = JSON.parse(ev.target.result);
+                } catch {
+                    alert("Ongeldig bestand — kan niet worden ingelezen.");
+                    return;
+                }
+                // Schema-validatie
+                if (
+                    typeof set.naam !== "string" ||
+                    !Array.isArray(set.opgaven) ||
+                    set.opgaven.some(o => typeof o.vraag !== "string" || typeof o.antwoord !== "string")
+                ) {
+                    alert("Bestand heeft een onbekend formaat.");
+                    return;
+                }
+                const conflictIdx = sets.findIndex(s => s.naam === set.naam);
+                if (conflictIdx !== -1) {
+                    importConflictSet = set;
+                    importConflictIndex = conflictIdx;
+                    toonImportConflict();
+                } else {
+                    sets.push(set);
+                    saveSets();
+                    showBeheerLijst();
+                }
+            };
+            reader.readAsText(bestand);
+        };
+
+        function toonImportConflict() {
+            hideAll();
+            views.beheerLijst.classList.remove("hidden");
+
+            let html = `<div class="card"><h2>Sets bewerken</h2>
+                <div class="flex-row">
+                    <button onclick="openEditor(-1)">➕ Nieuwe set</button>
+                    <button class="success" onclick="triggerImport()">📂 Openen</button>
+                </div><hr>
+                <div class="card" style="border: 2px solid #d97706;">
+                    <p style="color:#92400e; font-weight:bold; margin:0;">
+                        ⚠️ "${importConflictSet.naam}" bestaat al (${sets[importConflictIndex].opgaven.length} kaarten).
+                        Overschrijven met geïmporteerde versie (${importConflictSet.opgaven.length} kaarten)?
+                    </p>
+                    <div class="flex-row" style="margin-top:10px;">
+                        <button class="warning" onclick="bevestigImportOverschrijf()">Overschrijven</button>
+                        <button class="secondary" onclick="annuleerImport()">Annuleren</button>
+                    </div>
+                </div>`;
+
+            sets.forEach((s) => {
+                html += `<div class="card" style="border: 1px solid #ccc; opacity:0.4;">
+                    <b>${s.naam}</b> <span style="color:#888; font-size:13px;">(${s.opgaven.length} kaarten)</span>
+                </div>`;
+            });
+
+            html += `<button class="secondary" onclick="showMenu()">⬅ Terug</button></div>`;
+            views.beheerLijst.innerHTML = html;
+        }
+
+        function bevestigImportOverschrijf() {
+            sets[importConflictIndex] = importConflictSet;
+            saveSets();
+            importConflictSet = null;
+            importConflictIndex = -1;
+            showBeheerLijst();
+        }
+
+        function annuleerImport() {
+            importConflictSet = null;
+            importConflictIndex = -1;
+            showBeheerLijst();
+        }
+
+        // --- CENTRALE ENTER-HANDLER ---
+        let enterHandler = null;
+
+        function clearEnterHandler() {
+            if (enterHandler) {
+                document.removeEventListener('keydown', enterHandler);
+                enterHandler = null;
+            }
+        }
+
+        function setEnterHandler(correct) {
+            clearEnterHandler();
+            enterHandler = (e) => {
+                if (e.key !== 'Enter') return;
+                if (e.target.tagName === 'TEXTAREA') return;
+                e.preventDefault();
+                if (!isGecontroleerd) {
+                    checkOefenAntwoord(correct);
+                } else {
+                    huidigeKaartIndex++;
+                    toonOefenKaart();
+                }
+            };
+            document.addEventListener('keydown', enterHandler);
         }
 
         // --- OEFEN-MODULE ---
@@ -171,16 +364,17 @@
         let goedeAntwoordenEersteRonde = 0;
         let totaalAantalOpgaven = 0;
         let isEersteRonde = true;
-        let isGecontroleerd = false; 
+        let isGecontroleerd = false;
 
         function showOefenLijst() {
+            clearEnterHandler();
             hideAll();
             views.oefenLijst.classList.remove("hidden");
             let html = `<div class="card"><h2>🎯 Oefenen</h2>`;
             if (sets.length === 0) html += `<p>Geen sets beschikbaar.</p>`;
             sets.forEach((s, i) => {
                 html += `<div class="card" style="border-left: 5px solid #1e40af;">
-                    <b>${s.naam}</b><br>
+                    <b>${s.naam}</b> <span style="color:#888; font-size:13px;">(${s.opgaven.length} kaarten)</span><br>
                     <button onclick="startOefening(${i})">▶ Set spelen</button>
                 </div>`;
             });
@@ -201,8 +395,8 @@
                 }
             });
 
-            totaalAantalOpgaven = huidigeKaarten.length; // Inclusief de omgekeerde kaarten
-            huidigeKaarten = huidigeKaarten.sort(() => Math.random() - 0.5);
+            totaalAantalOpgaven = huidigeKaarten.length;
+            huidigeKaarten = shuffle(huidigeKaarten);
             huidigeKaartIndex = 0;
             fouteKaarten = [];
 
@@ -212,7 +406,7 @@
         }
 
         function toonOefenKaart() {
-            isGecontroleerd = false; 
+            isGecontroleerd = false;
             if (huidigeKaartIndex < huidigeKaarten.length) {
                 const kaart = huidigeKaarten[huidigeKaartIndex];
                 const vraag = kaart.isOmgekeerd ? kaart.antwoord : kaart.vraag;
@@ -220,30 +414,21 @@
 
                 views.oefenScherm.innerHTML = `
                     <div class="card">
-                        <h2>${huidigeOefening.naam} ${!isEersteRonde ? "(Herhaling)" : ""}</h2>
+                        <h2>${huidigeOefening.naam}${!isEersteRonde ? " (Herhaling)" : ""}</h2>
                         <p>Vraag ${huidigeKaartIndex + 1} van ${huidigeKaarten.length}</p>
                         <hr>
                         <p style="font-size: 20px;"><b>${vraag}</b></p>
                         <input id="oefenAntwoord" placeholder="Typ antwoord..." autocomplete="off">
                         <div id="feedbackContainer" class="feedback-area"></div>
                         <div id="actionContainer">
-                             <button id="btnCheck">Controleer (Enter)</button>
+                            <button id="btnCheck">Controleer (Enter)</button>
                         </div>
                     </div>
                 `;
-                
-                const input = document.getElementById("oefenAntwoord");
-                input.focus();
-                
-                // Enter-flow op input
-                input.onkeydown = (e) => {
-                    if (e.key === "Enter") {
-                        e.preventDefault();
-                        if (!isGecontroleerd) checkOefenAntwoord(correct);
-                    }
-                };
 
+                document.getElementById("oefenAntwoord").focus();
                 document.getElementById("btnCheck").onclick = () => checkOefenAntwoord(correct);
+                setEnterHandler(correct);
             } else {
                 eindeRonde();
             }
@@ -257,35 +442,32 @@
             const feedbackContainer = document.getElementById("feedbackContainer");
             const actionContainer = document.getElementById("actionContainer");
             const kaart = huidigeKaarten[huidigeKaartIndex];
-            
-            const isGoed = input.value.trim().toLowerCase() === correct.toLowerCase();
+
+            const isGoed = normalizeAntwoord(input.value) === normalizeAntwoord(correct);
             input.disabled = true;
 
             if (isGoed) {
                 feedbackContainer.innerHTML = `<p class="feedback-goed">✅ Goed!</p>`;
                 if (isEersteRonde) goedeAntwoordenEersteRonde++;
             } else {
+                fouteKaarten.push(kaart);
                 feedbackContainer.innerHTML = `
                     <p class="feedback-fout">❌ Fout!</p>
                     <p>Het juiste antwoord is: <b style="font-size: 20px;">${correct}</b></p>
                 `;
-                fouteKaarten.push(kaart);
             }
 
-            // Vervang de check-knop door de volgende-knop
             actionContainer.innerHTML = `<button id="btnNext">Volgende vraag (Enter)</button>`;
-            const btnNext = document.getElementById("btnNext");
-            btnNext.focus();
-            
-            btnNext.onclick = () => {
+            document.getElementById("btnNext").onclick = () => {
                 huidigeKaartIndex++;
                 toonOefenKaart();
             };
         }
 
         function eindeRonde() {
+            clearEnterHandler();
             const cijfer = (goedeAntwoordenEersteRonde / totaalAantalOpgaven) * 9 + 1;
-            
+
             if (fouteKaarten.length > 0) {
                 views.oefenScherm.innerHTML = `
                     <div class="card">
@@ -294,7 +476,7 @@
                             <p>Cijfer op basis van eerste poging:</p>
                             <h1 style="color:#1e40af;">${cijfer.toFixed(1)}</h1>
                         ` : "<p>Herhaling voltooid.</p>"}
-                        <p>Je hebt nog ${fouteKaarten.length} fouten over.</p>
+                        <p>Je hebt nog ${fouteKaarten.length} ${fouteKaarten.length === 1 ? "fout" : "fouten"} over.</p>
                         <hr>
                         <button onclick="startHerhaling()">Resterende fouten oefenen</button>
                         <button class="secondary" onclick="showOefenLijst()">Sessie stoppen</button>
@@ -313,13 +495,17 @@
 
         function startHerhaling() {
             isEersteRonde = false;
-            huidigeKaarten = [...fouteKaarten].sort(() => Math.random() - 0.5);
+            huidigeKaarten = shuffle([...fouteKaarten]);
             fouteKaarten = [];
             huidigeKaartIndex = 0;
             toonOefenKaart();
         }
 
-        // Navigatie Listeners
+        // --- IFRAME-DETECTIE ---
+        // In een sandboxed iframe zijn downloads geblokkeerd; verberg dan de opslaan-knoppen.
+        const inIframe = window.self !== window.top;
+
+        // --- NAVIGATIE ---
         document.getElementById("btnNavOefenen").onclick = showOefenLijst;
         document.getElementById("btnNavBeheer").onclick = showBeheerLijst;
         showMenu();
