@@ -113,11 +113,16 @@
                         </div>
                     </div>`;
                 } else {
-                    html += `<div class="flex-row" style="margin-top:10px;">
-                        <button onclick="openEditor(${i})">✏️ Bewerken</button>
-                        ${!inIframe ? `<button class="secondary" onclick="exporteerSet(${i})">💾 Opslaan</button>` : ''}
-                        <button class="danger" style="width:50px;" onclick="askDelete(${i})">🗑️</button>
-                    </div>`;
+                    html += `
+                        <div class="flex-row" style="margin-top:10px;">
+                            <button onclick="openEditor(${i})">✏️ Bewerken</button>
+                            <button id="btnDeel${i}" class="success" onclick="exporteerLink(${i})">🔗 Kopieer deellink</button>
+                        </div>
+                        <div id="linkContainer${i}"></div>
+                        <div class="flex-row" style="margin-top:6px;">
+                            ${!inIframe ? `<button class="secondary" onclick="exporteerSet(${i})">💾 Opslaan</button>` : ''}
+                            <button class="danger" onclick="askDelete(${i})">🗑️ Verwijder</button>
+                        </div>`;
                 }
                 html += `</div>`;
             });
@@ -243,6 +248,43 @@
             a.href = url;
             a.click();
             URL.revokeObjectURL(url);
+        }
+
+        // --- DEELLINK ---
+        // Vaste basis-URL — onafhankelijk van de omgeving waarin de app draait
+        const BASE_URL = "https://klaasjanvkd-netizen.github.io/flits/flitskaart.html";
+
+        function exporteerLink(i) {
+            const set = sets[i];
+            const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(set))));
+            const url = BASE_URL + '#set=' + encoded;
+
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(url).then(() => {
+                    const btn = document.getElementById("btnDeel" + i);
+                    if (!btn) return;
+                    const origineel = btn.textContent;
+                    btn.textContent = "✅ Gekopieerd!";
+                    setTimeout(() => { btn.textContent = origineel; }, 2000);
+                }).catch(() => toonLinkVeld(i, url));
+            } else {
+                toonLinkVeld(i, url);
+            }
+        }
+
+        function toonLinkVeld(i, url) {
+            const bestaand = document.getElementById("linkVeld" + i);
+            if (bestaand) return; // al zichtbaar
+            const container = document.getElementById("linkContainer" + i);
+            if (!container) return;
+            const veld = document.createElement("input");
+            veld.id = "linkVeld" + i;
+            veld.value = url;
+            veld.readOnly = true;
+            veld.style.cssText = "font-size:12px; margin-top:6px; color:#333;";
+            veld.onclick = () => veld.select();
+            container.appendChild(veld);
+            veld.select();
         }
 
         // --- IMPORT ---
@@ -501,14 +543,52 @@
             toonOefenKaart();
         }
 
+        // --- HASH-IMPORT ---
+        // Verwerk een #set=... hash bij het openen van de pagina.
+        function verwerkHash() {
+            const hash = window.location.hash;
+            if (!hash.startsWith('#set=')) return;
+            let set;
+            try {
+                set = JSON.parse(decodeURIComponent(escape(atob(hash.slice(5)))));
+            } catch {
+                return; // stille mislukking: ongeldige hash gewoon negeren
+            }
+            if (
+                typeof set.naam !== "string" ||
+                !Array.isArray(set.opgaven) ||
+                set.opgaven.some(o => typeof o.vraag !== "string" || typeof o.antwoord !== "string")
+            ) return;
+
+            // Hash direct wissen zodat refresh geen herhaalde importvraag geeft
+            history.replaceState(null, '', window.location.pathname);
+
+            const conflictIdx = sets.findIndex(s => s.naam === set.naam);
+            if (conflictIdx !== -1) {
+                importConflictSet = set;
+                importConflictIndex = conflictIdx;
+                showBeheerLijst();
+                toonImportConflict();
+            } else {
+                sets.push(set);
+                saveSets();
+                showBeheerLijst();
+            }
+        }
+
         // --- IFRAME-DETECTIE ---
-        // In een sandboxed iframe zijn downloads geblokkeerd; verberg dan de opslaan-knoppen.
         const inIframe = window.self !== window.top;
 
         // --- NAVIGATIE ---
         document.getElementById("btnNavOefenen").onclick = showOefenLijst;
         document.getElementById("btnNavBeheer").onclick = showBeheerLijst;
-        showMenu();
+
+        // Hash-check vóór showMenu: als er een hash is, start in beheerlijst met importvraag
+        if (window.location.hash.startsWith('#set=')) {
+            verwerkHash();
+        } else {
+            showMenu();
+        }
     </script>
 </body>
 </html>
